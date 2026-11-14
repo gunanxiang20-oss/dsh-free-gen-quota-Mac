@@ -137,6 +137,10 @@ window.__ModuleLoader__.load({
 .fgq-ok{color:#3ecf8e}.fgq-bad{color:#f87171}.fgq-warn{color:#fbbf24}.fgq-dim{color:var(--dsw-alias-label-tertiary)}
 .fgq-log{font:11px/1.55 ui-monospace,SFMono-Regular,monospace;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-interactive-bg-hover);border-radius:8px;padding:8px 10px;max-height:120px;overflow:auto;white-space:pre-wrap}
 .fgq-check{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.fgq-details{margin-top:8px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 12px;background:var(--dsw-alias-interactive-bg-hover)}
+.fgq-details summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary);user-select:none}
+.fgq-details[open] summary{margin-bottom:6px;color:var(--dsw-alias-label-primary)}
+.fgq-details.fail{border-color:#f87171}
 `
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -168,7 +172,9 @@ window.__ModuleLoader__.load({
       const [data, setData] = useState(null)
       const [log, setLog] = useState('')
       const [busy, setBusy] = useState('')
+      const [failSteps, setFailSteps] = useState({})
       const keysRef = useRef({})
+      const pollRef = useRef(null)
 
       const put = useCallback((line) => {
         setLog(current => (`${line}\n${current}`).slice(0, 3000))
@@ -210,6 +216,45 @@ window.__ModuleLoader__.load({
         const result = await api('/install', { id: entry.id, setDefault }, 30000)
         const row = (result.results ?? [])[0] ?? {}
         put(`${entry.name}: ${row.ok ? t('installDone') : row.note}`)
+      })
+      const oauthFetch = (entry) => {
+        put(`🔑 ${entry.name}：打开浏览器授权 …`)
+        void (async () => {
+          try {
+            const result = await api('/autofetch', { id: entry.id }, 20000)
+            put(result.note ?? '授权页已打开')
+            if (result.mode === 'oauth-started') {
+              let ticks = 0
+              if (pollRef.current) clearInterval(pollRef.current)
+              pollRef.current = setInterval(async () => {
+                ticks += 1
+                if (ticks > 96) { clearInterval(pollRef.current); pollRef.current = null; put('等待授权超时：请重试，或改用手动步骤'); return }
+                try {
+                  const snapshot = await api('/state', {}, 8000)
+                  const provider = (snapshot.providers ?? {})[entry.id]
+                  if ((provider?.key ?? '') !== '') {
+                    clearInterval(pollRef.current); pollRef.current = null
+                    put(`✅ ${entry.name} Key 已自动回填：${provider.key}。可以「检测额度 / 写入团团TV」了`)
+                    await load()
+                  }
+                } catch { /* transient */ }
+              }, 2500)
+            } else if (result.manualSteps?.length) {
+              setFailSteps(current => ({ ...current, [entry.id]: result.manualSteps }))
+            }
+          } catch (error) { put(`${t('errorPrefix')} [oauth]: ${error.message}`) }
+        })()
+      }
+      const cookieFetch = (entry) => run(`autofetch:${entry.id}`, async () => {
+        const value = keysRef.current[entry.id] ?? {}
+        put(`🍪 ${entry.name}：用登录 Cookie 尝试自动获取 Key …`)
+        const result = await api('/autofetch', { id: entry.id, credential: value.credential }, 60000)
+        if (result.ok) {
+          put(`✅ ${entry.name}: ${result.note ?? '自动获取成功'}`)
+        } else {
+          if (result.manualSteps?.length) setFailSteps(current => ({ ...current, [entry.id]: result.manualSteps }))
+          put(`❌ ${entry.name}: ${result.note ?? '自动获取失败'}`)
+        }
       })
       const claimAll = () => run('claim:all', async () => {
         put(`${t('claimAll')} …`)
@@ -260,6 +305,16 @@ window.__ModuleLoader__.load({
             h('div', { className: 'fgq-free' }, `🎁 ${entry.freeTier ?? ''}${entry.cost ? ` · ${entry.cost}` : ''}`),
             entry.claimUrl ? h('div', { className: 'fgq-free' }, h('a', { className: 'fgq-link', href: entry.claimUrl, target: '_blank', rel: 'noreferrer' }, entry.claimUrl)) : null,
             entry.claimSteps ? h('div', { className: 'fgq-steps' }, entry.claimSteps.map(step => `· ${step}`).join('\n')) : null,
+            entry.autoFetch?.mode === 'oauth'
+              ? h('div', { className: 'fgq-row' },
+                  h('button', { className: 'fgq-btn primary', disabled: busy !== '', onClick: () => oauthFetch(entry) }, '🔑 登录自动获取 Key'),
+                  h('span', { className: 'fgq-sub' }, entry.autoFetch.note ?? ''))
+              : null,
+            (failSteps[entry.id] ?? entry.manualSteps) && (failSteps[entry.id] ?? entry.manualSteps).length > 0
+              ? h('details', { className: `fgq-details ${failSteps[entry.id] ? 'fail' : ''}`, open: !!failSteps[entry.id], key: `steps-${entry.id}-${failSteps[entry.id] ? 'open' : 'shut'}` },
+                  h('summary', null, '📖 手动获取方法（自动获取失败时，按这个来）'),
+                  h('div', { className: 'fgq-steps' }, (failSteps[entry.id] ?? entry.manualSteps).map(step => step).join('\n')))
+              : null,
             entry.kind === 'key' || entry.kind === 'checkin'
               ? h('div', { className: 'fgq-row' },
                   entry.kind === 'key'
@@ -277,7 +332,10 @@ window.__ModuleLoader__.load({
                         onChange: event => { keysRef.current[entry.id] = { ...keysRef.current[entry.id], accountId: event.target.value } },
                       })
                     : null,
-                  h('button', { className: 'fgq-btn', onClick: () => saveKey(entry) }, entry.kind === 'key' ? t('saveKey') : t('saveCredential')))
+                  h('button', { className: 'fgq-btn', onClick: () => saveKey(entry) }, entry.kind === 'key' ? t('saveKey') : t('saveCredential')),
+                  entry.autoFetch?.mode === 'cookie'
+                    ? h('button', { className: 'fgq-btn', disabled: busy !== '', onClick: () => cookieFetch(entry) }, '🍪 从登录会话自动获取')
+                    : null)
               : null,
             statusLine ? h('div', { className: `fgq-status ${provider.lastProbeAt ? (provider.lastProbeOk ? 'fgq-ok' : 'fgq-bad') : 'fgq-dim'}` }, statusLine) : null,
             h('div', { className: 'fgq-row' },
