@@ -1,0 +1,9 @@
+# dsh-free-gen-quota bundle patch.
+# 单一 Host 条目：目录 + 领取引擎 + 本地桥 + Agent 工具 + 面板路由全在主入口。
+- insert:
+    - id: free-gen-quota
+      name: 'dsh-free-gen-quota'
+      config:
+        bridgePort: 18973
+        autoClaim: true
+        claimIntervalHours: 24
