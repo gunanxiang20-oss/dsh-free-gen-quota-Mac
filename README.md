@@ -45,7 +45,8 @@ git clone https://github.com/gunanxiang20-oss/dsh-free-gen-quota-Mac.git ~/.dsh/
 | 额度检测 | 每渠道一键提交一次极小测试请求，验证密钥/开通/额度是否可用 |
 | 一键写入团团TV | 通过宿主 settings 服务把渠道**合并**进 `dsh-imagegen` 命名空间，绝不覆盖用户已有渠道；密钥一并写入 |
 | Agent 工具 | `freegen_catalog` / `freegen_claim`（支持 `all:true` 一键全领）/ `freegen_probe` / `freegen_install` |
-| 面板 | `GET /api/free-gen/panel`（宿主同源），毛玻璃深色面板 |
+| 设置入口 | **DSH「设置」侧栏「免费额度工场」卡片**（仿 Our Free Model 的 `settings.section` 槽位，手写 ModuleLoader 客户端，零构建；中英双语、跟随宿主主题变量） |
+| 独立面板 | `GET /api/free-gen/panel`（宿主同源 HTML 面板，与设置卡片共用同一套路由） |
 
 ## 目录数据
 
